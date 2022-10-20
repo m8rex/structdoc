@@ -69,8 +69,61 @@ struct Inner {
     c: bool,
 }
 
+#[derive(Clone, StructDoc, Deserialize)]
+struct Simple {
+    /// An inner field
+    inner: Inner,
+    /// An integer
+    integer: usize,
+    /// An optional type
+    r#type: Option<SimpleExternalEnum>,
+    /// A vec of untagged
+    untagged: Vec<SimpleUntaggedEnum>,
+    /// A box of untagged
+    untaggeds: Box<UntaggedEnum>,
+}
+
+#[derive(Clone, StructDoc, Deserialize)]
+enum SimpleExternalEnum {
+    One,
+    Two,
+    Three,
+}
+
+#[derive(Clone, StructDoc, Deserialize)]
+#[serde(untagged)]
+enum SimpleUntaggedEnum {
+    /// One
+    #[serde(rename = "one")]
+    One,
+    /// Two
+    Two,
+    /// Three
+    Three,
+}
+
+#[derive(Clone, StructDoc, Deserialize)]
+#[serde(untagged)]
+enum UntaggedEnum {
+    /// An inner value
+    One(Inner),
+    /// A bool
+    Two(bool),
+    /// A recursive thing
+    Three(Simple),
+}
+
+#[derive(Clone, StructDoc, Deserialize)]
+struct Rec {
+    v: Box<Rec>,
+}
+
 fn main() {
     let documentation = Stuff::<Inner>::document();
     println!("{:?}", documentation);
     println!("{}", documentation);
+
+    //println!("{}", Rec::document());
+    //println!("{}", Simple::document());
+    println!("{}", Simple::document().markdown());
 }

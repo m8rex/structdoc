@@ -241,7 +241,7 @@ fn get_mods(what: &Ident, attrs: &[Attr]) -> TokenStream {
 }
 
 fn leaf(ty: &str) -> TokenStream {
-    quote!(::structdoc::Documentation::leaf(#ty))
+    quote!(|| ::structdoc::Documentation::leaf(#ty))
 }
 
 fn find_leaf(attrs: &[Attr]) -> Option<&str> {
@@ -264,7 +264,7 @@ fn find_with(attrs: &[Attr]) -> Option<&LitStr> {
 
 fn call_with(s: &LitStr) -> TokenStream {
     let with: Path = s.parse().unwrap();
-    quote!(#with())
+    quote!(#with)
 }
 
 fn named_field(field: &Field, container_attrs: &[Attr]) -> TokenStream {
@@ -286,18 +286,22 @@ fn named_field(field: &Field, container_attrs: &[Attr]) -> TokenStream {
     } else if is_leaf {
         leaf(found_leaf.unwrap_or_default())
     } else {
-        quote!(<#ty as ::structdoc::StructDoc>::document())
+        quote!(<#ty as ::structdoc::StructDoc>::document)
     };
 
     quote! {
-        let mut field = #field_document;
+        let field = #field_document;
+        let mut field = ::structdoc::Field::new(field, #doc);
         #mods
-        let field = ::structdoc::Field::new(field, #doc);
         fields.push((#name.into(), field));
     }
 }
 
-fn derive_struct(fields: &Punctuated<Field, Comma>, attrs: &[Attribute]) -> TokenStream {
+fn derive_struct(
+    name: String,
+    fields: &Punctuated<Field, Comma>,
+    attrs: &[Attribute],
+) -> TokenStream {
     let struct_attrs = parse_attrs(attrs);
     // TODO: Validate the attributes make sense here
     let insert_fields = fields.iter().map(|field| named_field(field, &struct_attrs));
@@ -305,7 +309,7 @@ fn derive_struct(fields: &Punctuated<Field, Comma>, attrs: &[Attribute]) -> Toke
     quote! {
         let mut fields = ::std::vec::Vec::<(&str, ::structdoc::Field)>::new();
         #(#insert_fields)*
-        ::structdoc::Documentation::struct_(fields)
+        ::structdoc::Documentation::struct_(#name.to_string(), fields)
     }
 }
 
@@ -327,9 +331,13 @@ fn find_tag_content(attrs: &[Attr]) -> Option<&str> {
     None
 }
 
-fn derive_enum(variants: &Punctuated<Variant, Comma>, attrs: &[Attribute]) -> TokenStream {
+fn derive_enum(
+    enum_name: String,
+    variants: &Punctuated<Variant, Comma>,
+    attrs: &[Attribute],
+) -> TokenStream {
     let enum_attrs = parse_attrs(attrs);
-    let insert_varianst = variants.iter().map(|variant| {
+    let insert_variants = variants.iter().map(|variant| {
         let variant_attrs = parse_attrs(&variant.attrs);
         let name = mangle_name(&variant.ident, &enum_attrs, &variant_attrs);
         let doc = get_doc(&variant_attrs);
@@ -350,18 +358,18 @@ fn derive_enum(variants: &Punctuated<Variant, Comma>, attrs: &[Attribute]) -> To
                     attrs.extend(enum_attrs.clone());
                     let insert_fields = fields.named.iter().map(|field| named_field(field, &attrs));
                     quote! {
-                        {
+                        || {
                             let mut fields =
                                 ::std::vec::Vec::<(&str, ::structdoc::Field)>::new();
                             #(#insert_fields)*
-                            ::structdoc::Documentation::struct_(fields)
+                            ::structdoc::Documentation::struct_(format!("{}_{}", #enum_name, #name),fields)
                         }
                     }
                 }
                 Fields::Unnamed(fields) if fields.unnamed.is_empty() => leaf(""),
                 Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                     let ty = &fields.unnamed[0].ty;
-                    quote!(<#ty as ::structdoc::StructDoc>::document())
+                    quote!(<#ty as ::structdoc::StructDoc>::document)
                 }
                 Fields::Unnamed(fields) => {
                     panic!(
@@ -372,9 +380,9 @@ fn derive_enum(variants: &Punctuated<Variant, Comma>, attrs: &[Attribute]) -> To
             }
         };
         quote! {
-            let mut variant = #constructor;
+            let variant = #constructor;
+            let mut variant = ::structdoc::Field::new(variant, #doc);
             #mods
-            let variant = ::structdoc::Field::new(variant, #doc);
             variants.push((#name.into(), variant));
         }
     });
@@ -391,8 +399,8 @@ fn derive_enum(variants: &Punctuated<Variant, Comma>, attrs: &[Attribute]) -> To
 
     quote! {
         let mut variants = ::std::vec::Vec::<(&str, ::structdoc::Field)>::new();
-        #(#insert_varianst)*
-        ::structdoc::Documentation::enum_(variants, ::structdoc::Tagging::#tag)
+        #(#insert_variants)*
+        ::structdoc::Documentation::enum_(#enum_name.to_string(), variants, ::structdoc::Tagging::#tag)
     }
 }
 
@@ -419,12 +427,14 @@ pub fn structdoc_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         Data::Struct(DataStruct {
             fields: Fields::Named(fields),
             ..
-        }) => derive_struct(&fields.named, &input.attrs),
+        }) => derive_struct(name.to_string(), &fields.named, &input.attrs),
         Data::Struct(DataStruct {
             fields: Fields::Unnamed(ref fields),
             ..
         }) if fields.unnamed.len() == 1 => derive_transparent(&fields.unnamed[0]),
-        Data::Enum(DataEnum { variants, .. }) => derive_enum(&variants, &input.attrs),
+        Data::Enum(DataEnum { variants, .. }) => {
+            derive_enum(name.to_string(), &variants, &input.attrs)
+        }
         _ => unimplemented!("Only named structs and enums for now :-("),
     };
     (quote! {

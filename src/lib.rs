@@ -231,30 +231,50 @@ impl Entry {
 }
 
 /// A documentation node with actual documentation text.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Field {
     doc: Text,
-    node: Node,
+    node: fn() -> Documentation,
+    node_flags: Vec<Flags>,
+}
+
+impl std::fmt::Debug for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{ doc: {:?}, flags: {:?} }}", self.doc, self.node_flags)
+    }
 }
 
 impl Field {
     /// Creates a field from (undocumented) documentation node and the documentation text.
     ///
     /// This is the proper way to add descriptions to struct fields and enum variants.
-    pub fn new(inner: Documentation, doc: impl Into<Text>) -> Self {
+    pub fn new(inner: fn() -> Documentation, doc: impl Into<Text>) -> Self {
         Field {
             doc: doc.into(),
-            node: inner.0,
+            node: inner,
+            node_flags: Vec::new(),
         }
     }
 
     fn entry(&self, prefix: &str, name: &str) -> Entry {
-        let mut entry = self.node.entry();
+        let mut entry = self.node().entry();
         if !self.doc.is_empty() {
             entry.text.extend(self.doc.lines().map(str::to_owned));
         }
         entry.caption = format!("{}{}", prefix, name);
         entry
+    }
+
+    fn node(&self) -> Node {
+        let mut node = (self.node)().0;
+        for flag in self.node_flags.iter() {
+            node.set_flag(*flag)
+        }
+        node
+    }
+
+    pub fn set_flag(&mut self, flag: Flags) {
+        self.node_flags.push(flag);
     }
 }
 
@@ -270,8 +290,9 @@ enum Node {
         key: Box<Node>,
         value: Box<Node>,
     },
-    Struct(Vec<(Text, Field)>),
+    Struct(String, Vec<(Text, Field)>),
     Enum {
+        name: String,
         variants: Vec<(Text, Field)>,
         tagging: Tagging,
     },
@@ -374,8 +395,12 @@ impl Node {
                 }
                 entry
             }
-            Node::Struct(fields) => Self::struct_from(fields),
-            Node::Enum { variants, tagging } => {
+            Node::Struct(_, fields) => Self::struct_from(fields),
+            Node::Enum {
+                name: _,
+                variants,
+                tagging,
+            } => {
                 let mut variants = variants
                     .iter()
                     .map(|(name, variant)| variant.entry("Variant ", name))
@@ -446,6 +471,194 @@ impl Node {
             }
         }
     }
+
+    fn markdown_link(s: String) -> String {
+        format!("[{}](#{})", s, s)
+    }
+
+    /// Return (object name, optional)
+    fn markdown_row_info(&self) -> (String, bool) {
+        match self {
+            Node::Leaf(ty) => (ty.to_string(), false),
+            Node::Wrapper {
+                child,
+                flags,
+                arity,
+            } => {
+                let prefix = match arity {
+                    Arity::One => "",
+                    Arity::ManyOrdered => "Array of ",
+                    Arity::ManyUnordered => "Set of ",
+                };
+                let name = child.markdown_row_info().0;
+                (
+                    format!("{}{}", prefix, Self::markdown_link(name)),
+                    flags.contains(Flags::OPTIONAL),
+                )
+
+                // TODO
+                /*
+
+                if flags.contains(Flags::FLATTEN) && *arity == Arity::One {
+                    child_entry.processing |= Processing::FLATTEN;
+                }
+                if flags.contains(Flags::HIDE) {
+                    child_entry.processing |= Processing::HIDE;
+                }*/
+            }
+            Node::Map { key, value } => (
+                format!(
+                    "Map from {} to {}",
+                    Self::markdown_link(key.markdown_row_info().0),
+                    Self::markdown_link(value.markdown_row_info().0)
+                ),
+                false,
+            ),
+            Node::Struct(name, _) => (name.clone(), false),
+            Node::Enum {
+                name,
+                variants: _,
+                tagging: _,
+            } => (name.clone(), false),
+        }
+    }
+
+    pub fn markdown(
+        &self,
+        fmt: &mut Formatter,
+        tables: &mut std::collections::HashSet<String>,
+    ) -> FmtResult {
+        /*
+        if tables.contains(&self.caption) {
+            return Ok(());
+        }*/
+        let mut to_generate = Vec::new();
+
+        let generated = match self {
+            Node::Leaf(_) => {
+                //writeln!(fmt, "#{}", self.markdown_row_info().0)?;
+                None
+            }
+            Node::Wrapper {
+                child,
+                flags: _,
+                arity: _,
+            } => {
+                let name = self.markdown_row_info().0.clone();
+                if tables.contains(&name) {
+                    return Ok(());
+                }
+                to_generate.push(*child.clone());
+                //writeln!(fmt, "{}", name)?; // TODO: optional?
+                Some(name)
+            }
+            Node::Map { key, value } => {
+                writeln!(fmt, "{}", self.markdown_row_info().0)?; // TODO: optional?
+                None
+            }
+            Node::Struct(name, fields) => {
+                if tables.contains(name) {
+                    return Ok(());
+                }
+                writeln!(fmt, "# {}", name)?;
+                writeln!(fmt, "|field|type|description|optional|")?;
+                writeln!(fmt, "|--|--|----|-|")?;
+                for (field_name, field) in fields.iter() {
+                    write!(fmt, "|{}|", field_name)?;
+                    let row_items = field.node().markdown_row_info();
+                    to_generate.push(field.node());
+                    write!(fmt, "{}|", Self::markdown_link(row_items.0))?;
+                    write!(fmt, "{}|", field.doc)?;
+                    writeln!(fmt, "{}|", row_items.1)?;
+                }
+                writeln!(fmt, "")?;
+                Some(name.to_owned())
+            }
+            Node::Enum {
+                name,
+                variants,
+                tagging,
+            } => {
+                if tables.contains(name) {
+                    return Ok(());
+                }
+                writeln!(fmt, "# {}", name)?;
+                /*let mut variants = variants
+                .iter()
+                .map(|(name, variant)| variant.entry("Variant ", name))
+                .filter(|entry| !entry.processing.contains(Processing::HIDE))
+                .collect::<Vec<_>>();*/
+                match tagging {
+                    Tagging::Untagged => {
+                        writeln!(fmt, "|type|description|")?;
+                        writeln!(fmt, "|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            let showable_name = variant.node().markdown_row_info().0;
+                            if showable_name.is_empty() {
+                                write!(fmt, r#"|"{}"|"#, name)?;
+                            } else {
+                                write!(fmt, "|{}|", Self::markdown_link(showable_name))?;
+                                to_generate.push(variant.node().clone());
+                            }
+                            writeln!(fmt, "{}|", variant.doc)?;
+                        }
+                        writeln!(fmt, "")?;
+                    }
+                    Tagging::External => {
+                        writeln!(fmt, "|name|type|description|")?;
+                        writeln!(fmt, "|--|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            write!(fmt, "|{}|", name)?;
+                            write!(
+                                fmt,
+                                "{}|",
+                                Self::markdown_link(variant.node().markdown_row_info().0)
+                            )?;
+                            writeln!(fmt, "{}|", variant.doc)?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                    Tagging::Internal { tag } => {
+                        writeln!(fmt, "|tag|name|type|description|")?;
+                        writeln!(fmt, "|--|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            write!(fmt, "|{}|", tag)?;
+                            write!(fmt, "{}|", name)?;
+                            write!(
+                                fmt,
+                                "{}|",
+                                Self::markdown_link(variant.node().markdown_row_info().0)
+                            )?;
+                            writeln!(fmt, "{}|", variant.doc)?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                    Tagging::Adjacent { tag, content } => {
+                        for (name, variant) in variants.iter() {
+                            writeln!(
+                                fmt,
+                                "- {}: {}, {}: {}",
+                                tag,
+                                name,
+                                content,
+                                variant.node().markdown_row_info().0
+                            )?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                };
+                writeln!(fmt, "")?;
+                Some(name.to_owned())
+            }
+        };
+        if let Some(generated) = generated {
+            tables.insert(generated);
+        }
+        for todo in to_generate.into_iter() {
+            todo.markdown(fmt, tables)?;
+        }
+        Ok(())
+    }
 }
 
 /// A representation of documentation.
@@ -510,8 +723,12 @@ impl Documentation {
     /// Builds a structure, provided a list of fields.
     ///
     /// The iterator should yield pairs of (name, field).
-    pub fn struct_(fields: impl IntoIterator<Item = (impl Into<Text>, Field)>) -> Self {
+    pub fn struct_(
+        name: String,
+        fields: impl IntoIterator<Item = (impl Into<Text>, Field)>,
+    ) -> Self {
         Documentation(Node::Struct(
+            name,
             fields.into_iter().map(|(t, f)| (t.into(), f)).collect(),
         ))
     }
@@ -525,13 +742,33 @@ impl Documentation {
     /// See the [serde documentation about enum
     /// representations](https://serde.rs/enum-representations.html) for `tagging`.
     pub fn enum_(
+        name: String,
         variants: impl IntoIterator<Item = (impl Into<Text>, Field)>,
         tagging: Tagging,
     ) -> Self {
         Documentation(Node::Enum {
+            name,
             variants: variants.into_iter().map(|(t, f)| (t.into(), f)).collect(),
             tagging,
         })
+    }
+}
+
+impl Documentation {
+    pub fn markdown(self) -> String {
+        // Hack of https://github.com/rust-lang/rust/issues/46591
+        let fmt = {
+            struct ManualDisplay(Documentation);
+
+            impl Display for ManualDisplay {
+                fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+                    self.0 .0.markdown(f, &mut std::collections::HashSet::new())
+                }
+            }
+
+            ManualDisplay(self)
+        };
+        format!("{}", fmt)
     }
 }
 
