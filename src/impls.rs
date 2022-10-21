@@ -47,6 +47,27 @@ array! {
     17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 }
 
+macro_rules! tuple {
+    () => {};
+    ($t1: tt $(, $t: tt)*) => {
+        impl<$t1: StructDoc $(,$t: StructDoc)*> StructDoc for ($t1,$($t,)*) {
+            fn document() -> Documentation {
+                Documentation::tuple(vec![
+                    $t1::document()
+                    $(
+                        , $t::document()
+                    )*
+                ])
+            }
+        }
+       tuple!($(
+            $t
+        ),*);
+    }
+}
+
+tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
+
 impl<T: StructDoc, S> StructDoc for HashSet<T, S> {
     fn document() -> Documentation {
         T::document().with_arity(Arity::ManyUnordered)

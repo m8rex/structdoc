@@ -111,6 +111,8 @@ enum UntaggedEnum {
     Two(bool),
     /// A recursive thing
     Three(Simple),
+    /// A tuple
+    Four((bool, usize, String, SimpleUntaggedEnum)),
 }
 
 #[derive(Clone, StructDoc, Deserialize)]

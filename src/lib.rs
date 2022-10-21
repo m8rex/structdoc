@@ -290,6 +290,7 @@ enum Node {
         key: Box<Node>,
         value: Box<Node>,
     },
+    Tuple(Vec<Node>),
     Struct(String, Vec<(Text, Field)>),
     Enum {
         name: String,
@@ -310,6 +311,27 @@ impl Node {
                 flags: flag,
                 arity: Arity::One,
             };
+        }
+    }
+
+    fn tuple_from(nodes: &Vec<Node>) -> Entry {
+        let mut sub = Vec::new();
+        for (idx, node) in nodes.iter().enumerate() {
+            let mut entry = node.entry();
+            entry.caption = format!("Item {}", idx);
+            if entry.processing.contains(Processing::HIDE) {
+                continue;
+            } else {
+                sub.push(entry);
+            }
+        }
+
+        Entry {
+            caption: String::new(),
+            text: Vec::new(),
+            flags: vec!["Struct".into()],
+            sub,
+            processing: Processing::SORT | Processing::STRUCT,
         }
     }
 
@@ -395,6 +417,7 @@ impl Node {
                 }
                 entry
             }
+            Node::Tuple(nodes) => Self::tuple_from(nodes),
             Node::Struct(_, fields) => Self::struct_from(fields),
             Node::Enum {
                 name: _,
@@ -495,7 +518,10 @@ impl Node {
                     Arity::ManyUnordered => "Set of ",
                 };
                 let name = child.markdown_row_info().0;
-                (name, flags.contains(Flags::OPTIONAL))
+                (
+                    format!("{}{}", prefix, name),
+                    flags.contains(Flags::OPTIONAL),
+                )
 
                 // TODO
                 /*
@@ -507,6 +533,17 @@ impl Node {
                     child_entry.processing |= Processing::HIDE;
                 }*/
             }
+            Node::Tuple(nodes) => (
+                format!(
+                    "Tuple({})",
+                    nodes
+                        .iter()
+                        .map(|n| n.markdown_row_info().0)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                false,
+            ),
             Node::Map { key, value } => (
                 format!(
                     "Map from {} to {}",
@@ -554,7 +591,11 @@ impl Node {
                 Some(name)
             }
             Node::Map { key, value } => {
-                writeln!(fmt, "{}", self.markdown_row_info().0)?; // TODO: optional?
+                //writeln!(fmt, "{}", self.markdown_row_info().0)?; // TODO: optional?
+                None
+            }
+            Node::Tuple(nodes) => {
+                //writeln!(fmt, "{}", self.markdown_row_info().0)?; // TODO: optional?
                 None
             }
             Node::Struct(name, fields) => {
@@ -709,6 +750,11 @@ impl Documentation {
             key: Box::new(key.0),
             value: Box::new(value.0),
         })
+    }
+
+    /// Builds a tuple
+    pub fn tuple(nodes: Vec<Documentation>) -> Self {
+        Documentation(Node::Tuple(nodes.into_iter().map(|d| d.0).collect()))
     }
 
     /// Builds a struct.
