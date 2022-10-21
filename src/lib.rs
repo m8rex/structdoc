@@ -472,8 +472,12 @@ impl Node {
         }
     }
 
+    fn header_name(s: &String) -> String {
+        s.replace(" ", "-")
+    }
+
     fn markdown_link(s: String) -> String {
-        format!("[{}](#{})", s, s)
+        format!("[{}](#{})", s, Self::header_name(&s))
     }
 
     /// Return (object name, optional)
@@ -491,10 +495,7 @@ impl Node {
                     Arity::ManyUnordered => "Set of ",
                 };
                 let name = child.markdown_row_info().0;
-                (
-                    format!("{}{}", prefix, Self::markdown_link(name)),
-                    flags.contains(Flags::OPTIONAL),
-                )
+                (name, flags.contains(Flags::OPTIONAL))
 
                 // TODO
                 /*
@@ -509,17 +510,17 @@ impl Node {
             Node::Map { key, value } => (
                 format!(
                     "Map from {} to {}",
-                    Self::markdown_link(key.markdown_row_info().0),
-                    Self::markdown_link(value.markdown_row_info().0)
+                    key.markdown_row_info().0,
+                    value.markdown_row_info().0
                 ),
                 false,
             ),
-            Node::Struct(name, _) => (name.clone(), false),
+            Node::Struct(name, _) => (Self::markdown_link(name.to_string()), false),
             Node::Enum {
                 name,
                 variants: _,
                 tagging: _,
-            } => (name.clone(), false),
+            } => (Self::markdown_link(name.to_string()), false),
         }
     }
 
@@ -567,7 +568,7 @@ impl Node {
                     write!(fmt, "|{}|", field_name)?;
                     let row_items = field.node().markdown_row_info();
                     to_generate.push(field.node());
-                    write!(fmt, "{}|", Self::markdown_link(row_items.0))?;
+                    write!(fmt, "{}|", row_items.0)?;
                     write!(fmt, "{}|", field.doc)?;
                     writeln!(fmt, "{}|", row_items.1)?;
                 }
@@ -597,7 +598,7 @@ impl Node {
                             if showable_name.is_empty() {
                                 write!(fmt, r#"|"{}"|"#, name)?;
                             } else {
-                                write!(fmt, "|{}|", Self::markdown_link(showable_name))?;
+                                write!(fmt, "|{}|", showable_name)?;
                                 to_generate.push(variant.node().clone());
                             }
                             writeln!(fmt, "{}|", variant.doc)?;
@@ -609,26 +610,18 @@ impl Node {
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
                             write!(fmt, "|{}|", name)?;
-                            write!(
-                                fmt,
-                                "{}|",
-                                Self::markdown_link(variant.node().markdown_row_info().0)
-                            )?;
+                            write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
                             writeln!(fmt, "{}|", variant.doc)?;
                             to_generate.push(variant.node());
                         }
                     }
                     Tagging::Internal { tag } => {
-                        writeln!(fmt, "|tag|name|type|description|")?;
+                        writeln!(fmt, "|name|type|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
                             write!(fmt, "|{}|", tag)?;
                             write!(fmt, "{}|", name)?;
-                            write!(
-                                fmt,
-                                "{}|",
-                                Self::markdown_link(variant.node().markdown_row_info().0)
-                            )?;
+                            write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
                             writeln!(fmt, "{}|", variant.doc)?;
                             to_generate.push(variant.node());
                         }
