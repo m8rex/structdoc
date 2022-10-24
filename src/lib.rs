@@ -561,6 +561,10 @@ impl Node {
         }
     }
 
+    fn handle_newlines(s: &Text) -> String {
+        s.to_string().replace("\n", "</br>")
+    }
+
     pub fn markdown(
         &self,
         fmt: &mut Formatter,
@@ -610,7 +614,7 @@ impl Node {
                     let row_items = field.node().markdown_row_info();
                     to_generate.push(field.node());
                     write!(fmt, "{}|", row_items.0)?;
-                    write!(fmt, "{}|", field.doc)?;
+                    write!(fmt, "{}|", Self::handle_newlines(&field.doc))?;
                     writeln!(fmt, "{}|", row_items.1)?;
                 }
                 writeln!(fmt, "")?;
@@ -625,6 +629,7 @@ impl Node {
                     return Ok(());
                 }
                 writeln!(fmt, "# {}", name)?;
+                writeln!(fmt, "One of the following items")?;
                 /*let mut variants = variants
                 .iter()
                 .map(|(name, variant)| variant.entry("Variant ", name))
@@ -642,28 +647,34 @@ impl Node {
                                 write!(fmt, "|{}|", showable_name)?;
                                 to_generate.push(variant.node().clone());
                             }
-                            writeln!(fmt, "{}|", variant.doc)?;
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
                         }
                         writeln!(fmt, "")?;
                     }
                     Tagging::External => {
+                        writeln!(fmt, "External tag named (name: <data>)")?;
                         writeln!(fmt, "|name|type|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
                             write!(fmt, "|{}|", name)?;
                             write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
-                            writeln!(fmt, "{}|", variant.doc)?;
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
                             to_generate.push(variant.node());
                         }
                     }
                     Tagging::Internal { tag } => {
-                        writeln!(fmt, "|name|type|description|")?;
+                        writeln!(fmt, "Internal tag named {}", tag)?;
+                        writeln!(fmt, "|tag-value|datatype of value|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            write!(fmt, "|{}|", tag)?;
-                            write!(fmt, "{}|", name)?;
-                            write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
-                            writeln!(fmt, "{}|", variant.doc)?;
+                            let showable_name = variant.node().markdown_row_info().0;
+                            if showable_name.is_empty() {
+                                write!(fmt, r#"|"{}"||"#, name)?;
+                            } else {
+                                write!(fmt, "|{}|", name)?;
+                                write!(fmt, "{}|", showable_name)?;
+                            }
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
                             to_generate.push(variant.node());
                         }
                     }
