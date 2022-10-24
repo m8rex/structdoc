@@ -120,6 +120,20 @@ struct Rec {
     v: Box<Rec>,
 }
 
+#[derive(Clone, StructDoc, Deserialize)]
+struct Flattened {
+    a: bool,
+    #[serde(flatten)]
+    b: FlattenedPart,
+}
+
+#[derive(Clone, StructDoc, Deserialize)]
+struct FlattenedPart {
+    c: bool,
+    d: bool,
+    e: bool,
+}
+
 fn main() {
     let documentation = Stuff::<Inner>::document();
     println!("{:?}", documentation);
@@ -128,4 +142,5 @@ fn main() {
     //println!("{}", Rec::document());
     //println!("{}", Simple::document());
     println!("{}", Simple::document().markdown());
+    println!("{}", Flattened::document().markdown());
 }

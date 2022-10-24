@@ -135,6 +135,7 @@ bitflags! {
         const FLATTEN = 0b0000_0100;
         const STRUCT  = 0b0000_1000;
         const ENUM    = 0b0001_0000;
+        const TUPLE   = 0b0010_0000;
     }
 }
 
@@ -300,6 +301,21 @@ enum Node {
 }
 
 impl Node {
+    fn rename(self, s: String) -> Node {
+        match self {
+            Node::Struct(_, fields) => Node::Struct(s, fields),
+            Node::Enum {
+                name: _,
+                variants,
+                tagging,
+            } => Node::Enum {
+                name: s,
+                variants,
+                tagging,
+            },
+            n => n,
+        }
+    }
     fn set_flag(&mut self, flag: Flags) {
         if let Node::Wrapper { ref mut flags, .. } = self {
             *flags |= flag;
@@ -329,9 +345,9 @@ impl Node {
         Entry {
             caption: String::new(),
             text: Vec::new(),
-            flags: vec!["Struct".into()],
+            flags: vec!["tuple".into()],
             sub,
-            processing: Processing::SORT | Processing::STRUCT,
+            processing: Processing::TUPLE,
         }
     }
 
@@ -565,6 +581,118 @@ impl Node {
         s.to_string().replace("\n", "</br>")
     }
 
+    pub fn markdown_struct_rows(
+        &self,
+        fmt: &mut Formatter,
+        doc: Option<Text>,
+    ) -> Result<Vec<Node>, std::fmt::Error> {
+        let to_generate = match self {
+            Node::Leaf(_) => Vec::new(),
+            Node::Wrapper {
+                child,
+                flags: _,
+                arity: _,
+            } => child.markdown_struct_rows(fmt, doc)?,
+            Node::Map { key, value } => {
+                let mut to_generate = Vec::new();
+                write!(fmt, "|<any-key>|")?;
+                let row_items = value.markdown_row_info();
+                to_generate.push(*value.clone());
+                write!(fmt, "{}|", row_items.0)?;
+                write!(fmt, "{}|", Self::handle_newlines(doc.as_ref().unwrap()))?;
+                writeln!(fmt, "{}|", row_items.1)?;
+                to_generate
+            }
+            Node::Tuple(nodes) => Vec::new(),
+            Node::Struct(name, fields) => {
+                let mut to_generate = Vec::new();
+                for (field_name, field) in fields.iter() {
+                    if !field.node_flags.contains(&Flags::FLATTEN) {
+                        write!(fmt, "|{}|", field_name)?;
+                        let row_items = field.node().markdown_row_info();
+                        to_generate.push(field.node());
+                        write!(fmt, "{}|", row_items.0)?;
+                        write!(fmt, "{}|", Self::handle_newlines(&field.doc))?;
+                        writeln!(fmt, "{}|", row_items.1)?;
+                    } else {
+                        let node = field.node();
+                        to_generate.extend(
+                            node.markdown_struct_rows(fmt, Some(field.doc.clone()))?
+                                .into_iter(),
+                        );
+                    }
+                }
+                to_generate
+            }
+            Node::Enum {
+                name,
+                variants,
+                tagging,
+            } => {
+                /*match tagging {
+                    Tagging::Untagged => {
+                        writeln!(fmt, "|type|description|")?;
+                        writeln!(fmt, "|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            let showable_name = variant.node().markdown_row_info().0;
+                            if showable_name.is_empty() {
+                                write!(fmt, r#"|"{}"|"#, name)?;
+                            } else {
+                                write!(fmt, "|{}|", showable_name)?;
+                                to_generate.push(variant.node().clone());
+                            }
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
+                        }
+                        writeln!(fmt, "")?;
+                    }
+                    Tagging::External => {
+                        writeln!(fmt, "External tag named (name: <data>)")?;
+                        writeln!(fmt, "|name|type|description|")?;
+                        writeln!(fmt, "|--|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            write!(fmt, "|{}|", name)?;
+                            write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                    Tagging::Internal { tag } => {
+                        writeln!(fmt, "Internal tag named {}", tag)?;
+                        writeln!(fmt, "|tag-value|datatype of value|description|")?;
+                        writeln!(fmt, "|--|--|----|")?;
+                        for (name, variant) in variants.iter() {
+                            let showable_name = variant.node().markdown_row_info().0;
+                            if showable_name.is_empty() {
+                                write!(fmt, r#"|"{}"||"#, name)?;
+                            } else {
+                                write!(fmt, "|{}|", name)?;
+                                write!(fmt, "{}|", showable_name)?;
+                            }
+                            writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                    Tagging::Adjacent { tag, content } => {
+                        for (name, variant) in variants.iter() {
+                            writeln!(
+                                fmt,
+                                "- {}: {}, {}: {}",
+                                tag,
+                                name,
+                                content,
+                                variant.node().markdown_row_info().0
+                            )?;
+                            to_generate.push(variant.node());
+                        }
+                    }
+                };
+                writeln!(fmt, "")?; */
+                Vec::new()
+            }
+        };
+        Ok(to_generate)
+    }
+
     pub fn markdown(
         &self,
         fmt: &mut Formatter,
@@ -609,14 +737,7 @@ impl Node {
                 writeln!(fmt, "# {}", name)?;
                 writeln!(fmt, "|field|type|description|optional|")?;
                 writeln!(fmt, "|--|--|----|-|")?;
-                for (field_name, field) in fields.iter() {
-                    write!(fmt, "|{}|", field_name)?;
-                    let row_items = field.node().markdown_row_info();
-                    to_generate.push(field.node());
-                    write!(fmt, "{}|", row_items.0)?;
-                    write!(fmt, "{}|", Self::handle_newlines(&field.doc))?;
-                    writeln!(fmt, "{}|", row_items.1)?;
-                }
+                to_generate.extend(self.markdown_struct_rows(fmt, None)?.into_iter());
                 writeln!(fmt, "")?;
                 Some(name.to_owned())
             }
@@ -629,7 +750,6 @@ impl Node {
                     return Ok(());
                 }
                 writeln!(fmt, "# {}", name)?;
-                writeln!(fmt, "One of the following items")?;
                 /*let mut variants = variants
                 .iter()
                 .map(|(name, variant)| variant.entry("Variant ", name))
@@ -637,6 +757,7 @@ impl Node {
                 .collect::<Vec<_>>();*/
                 match tagging {
                     Tagging::Untagged => {
+                        writeln!(fmt, "One of the following items:")?;
                         writeln!(fmt, "|type|description|")?;
                         writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
@@ -652,18 +773,19 @@ impl Node {
                         writeln!(fmt, "")?;
                     }
                     Tagging::External => {
-                        writeln!(fmt, "External tag named (name: <data>)")?;
-                        writeln!(fmt, "|name|type|description|")?;
-                        writeln!(fmt, "|--|--|----|")?;
+                        writeln!(fmt, "One of the following items:")?;
+                        writeln!(fmt, "|name|description|")?;
+                        writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            write!(fmt, "|{}|", name)?;
-                            write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
+                            write!(fmt, r#"|"{}"|"#, name)?;
+                            //write!(fmt, "{}|", variant.node().markdown_row_info().0)?;
                             writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
                             to_generate.push(variant.node());
                         }
                     }
                     Tagging::Internal { tag } => {
-                        writeln!(fmt, "Internal tag named {}", tag)?;
+                        writeln!(fmt, "Internal tag named {}.", tag)?;
+                        writeln!(fmt, "One of the following items:")?;
                         writeln!(fmt, "|tag-value|datatype of value|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
@@ -679,6 +801,7 @@ impl Node {
                         }
                     }
                     Tagging::Adjacent { tag, content } => {
+                        writeln!(fmt, "One of the following items:")?;
                         for (name, variant) in variants.iter() {
                             writeln!(
                                 fmt,
@@ -819,6 +942,9 @@ impl Documentation {
             ManualDisplay(self)
         };
         format!("{}", fmt)
+    }
+    pub fn rename(self, s: String) -> Self {
+        Documentation(self.0.rename(s))
     }
 }
 
