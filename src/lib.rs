@@ -578,7 +578,7 @@ impl Node {
     }
 
     fn handle_newlines(s: &Text) -> String {
-        s.to_string().replace("\n", "</br>")
+        s.to_string().replace("\n\n", "</br>").replace("\n", " ")
     }
 
     pub fn markdown_struct_rows(
