@@ -541,7 +541,7 @@ impl Node {
                     Arity::ManyOrdered => "Array of ",
                     Arity::ManyUnordered => "Set of ",
                     Arity::OrNone => r#""none" or "#,
-                    Arity::OrVariableValued => r#"variable-value or "#,
+                    Arity::OrVariableValued => r#"jme-string or "#,
                 };
                 let name = child.markdown_row_info().0;
                 (
