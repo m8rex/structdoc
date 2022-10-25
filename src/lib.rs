@@ -152,6 +152,12 @@ pub enum Arity {
 
     /// Multiple things of the same kind, without specified order.
     ManyUnordered,
+
+    /// Can also be none
+    OrNone,
+
+    /// Can also be variable valued
+    OrVariableValued,
 }
 
 /// A tagging of an enum.
@@ -406,6 +412,8 @@ impl Node {
                     Arity::One => (),
                     Arity::ManyOrdered => child_entry.flags.push("Array".into()),
                     Arity::ManyUnordered => child_entry.flags.push("Set".into()),
+                    Arity::OrNone => child_entry.flags.push("Noneable".into()),
+                    Arity::OrVariableValued => child_entry.flags.push("VariableValued".into()),
                 }
                 if flags.contains(Flags::OPTIONAL) {
                     child_entry.flags.push("Optional".into());
@@ -532,6 +540,8 @@ impl Node {
                     Arity::One => "",
                     Arity::ManyOrdered => "Array of ",
                     Arity::ManyUnordered => "Set of ",
+                    Arity::OrNone => r#""none" or "#,
+                    Arity::OrVariableValued => r#"variable-value or "#,
                 };
                 let name = child.markdown_row_info().0;
                 (
@@ -595,7 +605,7 @@ impl Node {
             } => child.markdown_struct_rows(fmt, doc)?,
             Node::Map { key, value } => {
                 let mut to_generate = Vec::new();
-                write!(fmt, "|<any-key>|")?;
+                write!(fmt, "|[any]|")?;
                 let row_items = value.markdown_row_info();
                 to_generate.push(*value.clone());
                 write!(fmt, "{}|", row_items.0)?;
