@@ -84,7 +84,7 @@
 //! [`Deserialize`]: https://docs.rs/serde/~1/serde/trait.Deserialize.html
 
 use std::borrow::Cow;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::mem;
 
 use itertools::Itertools;
@@ -523,12 +523,17 @@ impl Node {
         s.replace(" ", "-")
     }
 
-    fn markdown_link(s: String) -> String {
-        format!("[{}](#{})", s, Self::header_name(&s))
+    fn markdown_link(s: String, with_links: bool) -> String {
+        let name = Self::header_name(&s);
+        if with_links {
+            format!("[{}](#{})", s, name)
+        } else {
+            name
+        }
     }
 
     /// Return (object name, optional)
-    fn markdown_row_info(&self) -> (String, bool) {
+    fn markdown_row_info(&self, with_links: bool) -> (String, bool) {
         match self {
             Node::Leaf(ty) => (ty.to_string(), false),
             Node::Wrapper {
@@ -543,7 +548,7 @@ impl Node {
                     Arity::OrNone => r#""none" or "#,
                     Arity::OrVariableValued => r#"jme-string or "#,
                 };
-                let name = child.markdown_row_info().0;
+                let name = child.markdown_row_info(with_links).0;
                 (
                     format!("{}{}", prefix, name),
                     flags.contains(Flags::OPTIONAL),
@@ -564,7 +569,7 @@ impl Node {
                     "Tuple({})",
                     nodes
                         .iter()
-                        .map(|n| n.markdown_row_info().0)
+                        .map(|n| n.markdown_row_info(with_links).0)
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
@@ -573,17 +578,17 @@ impl Node {
             Node::Map { key, value } => (
                 format!(
                     "Map from {} to {}",
-                    key.markdown_row_info().0,
-                    value.markdown_row_info().0
+                    key.markdown_row_info(with_links).0,
+                    value.markdown_row_info(with_links).0
                 ),
                 false,
             ),
-            Node::Struct(name, _) => (Self::markdown_link(name.to_string()), false),
+            Node::Struct(name, _) => (Self::markdown_link(name.to_string(), with_links), false),
             Node::Enum {
                 name,
                 variants: _,
                 tagging: _,
-            } => (Self::markdown_link(name.to_string()), false),
+            } => (Self::markdown_link(name.to_string(), with_links), false),
         }
     }
 
@@ -593,8 +598,9 @@ impl Node {
 
     pub fn markdown_struct_rows(
         &self,
-        fmt: &mut Formatter,
+        fmt: &mut String,
         doc: Option<Text>,
+        with_links: bool,
     ) -> Result<Vec<Node>, std::fmt::Error> {
         let to_generate = match self {
             Node::Leaf(_) => Vec::new(),
@@ -602,11 +608,11 @@ impl Node {
                 child,
                 flags: _,
                 arity: _,
-            } => child.markdown_struct_rows(fmt, doc)?,
+            } => child.markdown_struct_rows(fmt, doc, with_links)?,
             Node::Map { key, value } => {
                 let mut to_generate = Vec::new();
                 write!(fmt, "|[any]|")?;
-                let row_items = value.markdown_row_info();
+                let row_items = value.markdown_row_info(with_links);
                 to_generate.push(*value.clone());
                 write!(fmt, "{}|", row_items.0)?;
                 write!(fmt, "{}|", Self::handle_newlines(doc.as_ref().unwrap()))?;
@@ -619,7 +625,7 @@ impl Node {
                 for (field_name, field) in fields.iter() {
                     if !field.node_flags.contains(&Flags::FLATTEN) {
                         write!(fmt, "|{}|", field_name)?;
-                        let row_items = field.node().markdown_row_info();
+                        let row_items = field.node().markdown_row_info(with_links);
                         to_generate.push(field.node());
                         write!(fmt, "{}|", row_items.0)?;
                         write!(fmt, "{}|", Self::handle_newlines(&field.doc))?;
@@ -627,7 +633,7 @@ impl Node {
                     } else {
                         let node = field.node();
                         to_generate.extend(
-                            node.markdown_struct_rows(fmt, Some(field.doc.clone()))?
+                            node.markdown_struct_rows(fmt, Some(field.doc.clone()), with_links)?
                                 .into_iter(),
                         );
                     }
@@ -703,10 +709,11 @@ impl Node {
         Ok(to_generate)
     }
 
-    pub fn markdown(
+    pub fn markdown_tables(
         &self,
-        fmt: &mut Formatter,
         tables: &mut std::collections::HashSet<String>,
+        result: &mut Vec<(String, String)>,
+        with_links: bool,
     ) -> FmtResult {
         /*
         if tables.contains(&self.caption) {
@@ -724,7 +731,7 @@ impl Node {
                 flags: _,
                 arity: _,
             } => {
-                let name = self.markdown_row_info().0.clone();
+                let name = self.markdown_row_info(with_links).0.clone();
                 if tables.contains(&name) {
                     return Ok(());
                 }
@@ -744,11 +751,15 @@ impl Node {
                 if tables.contains(name) {
                     return Ok(());
                 }
+                let mut fmt = String::new();
                 writeln!(fmt, "# {}", name)?;
                 writeln!(fmt, "|field|type|description|optional|")?;
                 writeln!(fmt, "|--|--|----|-|")?;
-                to_generate.extend(self.markdown_struct_rows(fmt, None)?.into_iter());
-                writeln!(fmt, "")?;
+                to_generate.extend(
+                    self.markdown_struct_rows(&mut fmt, None, with_links)?
+                        .into_iter(),
+                );
+                result.push((name.to_owned(), fmt));
                 Some(name.to_owned())
             }
             Node::Enum {
@@ -759,6 +770,7 @@ impl Node {
                 if tables.contains(name) {
                     return Ok(());
                 }
+                let mut fmt = String::new();
                 writeln!(fmt, "# {}", name)?;
                 /*let mut variants = variants
                 .iter()
@@ -771,7 +783,7 @@ impl Node {
                         writeln!(fmt, "|type|description|")?;
                         writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            let showable_name = variant.node().markdown_row_info().0;
+                            let showable_name = variant.node().markdown_row_info(with_links).0;
                             if showable_name.is_empty() {
                                 write!(fmt, r#"|"{}"|"#, name)?;
                             } else {
@@ -780,7 +792,6 @@ impl Node {
                             }
                             writeln!(fmt, "{}|", Self::handle_newlines(&variant.doc))?;
                         }
-                        writeln!(fmt, "")?;
                     }
                     Tagging::External => {
                         writeln!(fmt, "One of the following items:")?;
@@ -799,7 +810,7 @@ impl Node {
                         writeln!(fmt, "|tag-value|datatype of value|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            let showable_name = variant.node().markdown_row_info().0;
+                            let showable_name = variant.node().markdown_row_info(with_links).0;
                             if showable_name.is_empty() {
                                 write!(fmt, r#"|"{}"||"#, name)?;
                             } else {
@@ -819,13 +830,13 @@ impl Node {
                                 tag,
                                 name,
                                 content,
-                                variant.node().markdown_row_info().0
+                                variant.node().markdown_row_info(with_links).0
                             )?;
                             to_generate.push(variant.node());
                         }
                     }
                 };
-                writeln!(fmt, "")?;
+                result.push((name.to_owned(), fmt));
                 Some(name.to_owned())
             }
         };
@@ -833,7 +844,7 @@ impl Node {
             tables.insert(generated);
         }
         for todo in to_generate.into_iter() {
-            todo.markdown(fmt, tables)?;
+            todo.markdown_tables(tables, result, with_links)?;
         }
         Ok(())
     }
@@ -938,20 +949,30 @@ impl Documentation {
 }
 
 impl Documentation {
-    pub fn markdown(self) -> String {
-        // Hack of https://github.com/rust-lang/rust/issues/46591
-        let fmt = {
-            struct ManualDisplay(Documentation);
-
-            impl Display for ManualDisplay {
-                fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-                    self.0 .0.markdown(f, &mut std::collections::HashSet::new())
-                }
-            }
-
-            ManualDisplay(self)
-        };
-        format!("{}", fmt)
+    pub fn markdown(
+        self,
+        known_tables: &mut std::collections::HashSet<String>,
+        with_links: bool,
+    ) -> String {
+        let mut s = String::new();
+        let mut result = Default::default();
+        let tables = self
+            .0
+            .markdown_tables(known_tables, &mut result, with_links);
+        for (_, md) in result.into_iter() {
+            writeln!(s, "{}", md);
+        }
+        s
+    }
+    pub fn markdown_tables(
+        self,
+        known_tables: &mut std::collections::HashSet<String>,
+        with_links: bool,
+    ) -> Vec<(String, String)> {
+        let mut result = Default::default();
+        self.0
+            .markdown_tables(known_tables, &mut result, with_links);
+        result
     }
     pub fn rename(self, s: String) -> Self {
         Documentation(self.0.rename(s))

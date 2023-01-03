@@ -139,8 +139,26 @@ fn main() {
     println!("{:?}", documentation);
     println!("{}", documentation);
 
+    let mut created_tables = Default::default();
+    println!(
+        "{:?}",
+        documentation
+            .clone()
+            .markdown_tables(&mut created_tables, true)
+    );
+    let mut created_tables = Default::default();
+    println!(
+        "{:?}",
+        documentation.markdown_tables(&mut created_tables, false)
+    );
+
     //println!("{}", Rec::document());
     //println!("{}", Simple::document());
-    println!("{}", Simple::document().markdown());
-    println!("{}", Flattened::document().markdown());
+    let mut created_tables = Default::default();
+    println!("{}", Simple::document().markdown(&mut created_tables, true));
+    let mut created_tables = Default::default();
+    println!(
+        "{}",
+        Flattened::document().markdown(&mut created_tables, true)
+    );
 }
