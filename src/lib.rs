@@ -635,7 +635,7 @@ impl Node {
                         if settings.with_optional {
                             write!(fmt, "{}|", row_items.1)?;
                         }
-                        write!(fmt, "")?;
+                        writeln!(fmt, "")?;
                     } else {
                         let node = field.node();
                         to_generate.extend(
@@ -763,12 +763,12 @@ impl Node {
                 if settings.with_optional {
                     write!(fmt, "optional|")?;
                 }
-                writeln!(fmt, "");
+                writeln!(fmt, "")?;
                 write!(fmt, "|--|--|----|")?;
                 if settings.with_optional {
                     write!(fmt, "-|")?;
                 }
-                writeln!(fmt, "");
+                writeln!(fmt, "")?;
                 to_generate.extend(
                     self.markdown_struct_rows(&mut fmt, None, settings)?
                         .into_iter(),
