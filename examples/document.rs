@@ -2,7 +2,7 @@
 // unhappy.
 #![allow(dead_code)]
 use serde_derive::Deserialize;
-use structdoc::{Documentation, StructDoc};
+use structdoc::{Documentation, MarkdownSettings, StructDoc};
 
 #[derive(StructDoc)]
 struct A<T: Default = ()>(T);
@@ -144,21 +144,27 @@ fn main() {
         "{:?}",
         documentation
             .clone()
-            .markdown_tables(&mut created_tables, true)
+            .markdown_tables(&mut created_tables, MarkdownSettings::new())
     );
     let mut created_tables = Default::default();
     println!(
         "{:?}",
-        documentation.markdown_tables(&mut created_tables, false)
+        documentation.markdown_tables(
+            &mut created_tables,
+            MarkdownSettings::new().without_links().without_optional()
+        )
     );
 
     //println!("{}", Rec::document());
     //println!("{}", Simple::document());
     let mut created_tables = Default::default();
-    println!("{}", Simple::document().markdown(&mut created_tables, true));
+    println!(
+        "{}",
+        Simple::document().markdown(&mut created_tables, MarkdownSettings::new())
+    );
     let mut created_tables = Default::default();
     println!(
         "{}",
-        Flattened::document().markdown(&mut created_tables, true)
+        Flattened::document().markdown(&mut created_tables, MarkdownSettings::new())
     );
 }

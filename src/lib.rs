@@ -526,7 +526,7 @@ impl Node {
     fn markdown_link(s: String, with_links: bool) -> String {
         let name = Self::header_name(&s);
         if with_links {
-            format!("[{}](#{})", s, name)
+            format!("[{}](#{})", s, name.to_lowercase())
         } else {
             name
         }
@@ -600,7 +600,7 @@ impl Node {
         &self,
         fmt: &mut String,
         doc: Option<Text>,
-        with_links: bool,
+        settings: MarkdownSettings,
     ) -> Result<Vec<Node>, std::fmt::Error> {
         let to_generate = match self {
             Node::Leaf(_) => Vec::new(),
@@ -608,15 +608,18 @@ impl Node {
                 child,
                 flags: _,
                 arity: _,
-            } => child.markdown_struct_rows(fmt, doc, with_links)?,
+            } => child.markdown_struct_rows(fmt, doc, settings)?,
             Node::Map { key, value } => {
                 let mut to_generate = Vec::new();
                 write!(fmt, "|[any]|")?;
-                let row_items = value.markdown_row_info(with_links);
+                let row_items = value.markdown_row_info(settings.with_links);
                 to_generate.push(*value.clone());
                 write!(fmt, "{}|", row_items.0)?;
                 write!(fmt, "{}|", Self::handle_newlines(doc.as_ref().unwrap()))?;
-                writeln!(fmt, "{}|", row_items.1)?;
+                if settings.with_optional {
+                    write!(fmt, "{}|", row_items.1)?;
+                }
+                writeln!(fmt, "")?;
                 to_generate
             }
             Node::Tuple(nodes) => Vec::new(),
@@ -625,15 +628,18 @@ impl Node {
                 for (field_name, field) in fields.iter() {
                     if !field.node_flags.contains(&Flags::FLATTEN) {
                         write!(fmt, "|{}|", field_name)?;
-                        let row_items = field.node().markdown_row_info(with_links);
+                        let row_items = field.node().markdown_row_info(settings.with_links);
                         to_generate.push(field.node());
                         write!(fmt, "{}|", row_items.0)?;
                         write!(fmt, "{}|", Self::handle_newlines(&field.doc))?;
-                        writeln!(fmt, "{}|", row_items.1)?;
+                        if settings.with_optional {
+                            write!(fmt, "{}|", row_items.1)?;
+                        }
+                        write!(fmt, "")?;
                     } else {
                         let node = field.node();
                         to_generate.extend(
-                            node.markdown_struct_rows(fmt, Some(field.doc.clone()), with_links)?
+                            node.markdown_struct_rows(fmt, Some(field.doc.clone()), settings)?
                                 .into_iter(),
                         );
                     }
@@ -713,7 +719,7 @@ impl Node {
         &self,
         tables: &mut std::collections::HashSet<String>,
         result: &mut Vec<(String, String)>,
-        with_links: bool,
+        settings: MarkdownSettings,
     ) -> FmtResult {
         /*
         if tables.contains(&self.caption) {
@@ -731,7 +737,7 @@ impl Node {
                 flags: _,
                 arity: _,
             } => {
-                let name = self.markdown_row_info(with_links).0.clone();
+                let name = self.markdown_row_info(settings.with_links).0.clone();
                 if tables.contains(&name) {
                     return Ok(());
                 }
@@ -753,10 +759,18 @@ impl Node {
                 }
                 let mut fmt = String::new();
                 writeln!(fmt, "# {}", name)?;
-                writeln!(fmt, "|field|type|description|optional|")?;
-                writeln!(fmt, "|--|--|----|-|")?;
+                write!(fmt, "|field|type|description|")?;
+                if settings.with_optional {
+                    write!(fmt, "optional|")?;
+                }
+                writeln!(fmt, "");
+                write!(fmt, "|--|--|----|")?;
+                if settings.with_optional {
+                    write!(fmt, "-|")?;
+                }
+                writeln!(fmt, "");
                 to_generate.extend(
-                    self.markdown_struct_rows(&mut fmt, None, with_links)?
+                    self.markdown_struct_rows(&mut fmt, None, settings)?
                         .into_iter(),
                 );
                 result.push((name.to_owned(), fmt));
@@ -783,7 +797,8 @@ impl Node {
                         writeln!(fmt, "|type|description|")?;
                         writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            let showable_name = variant.node().markdown_row_info(with_links).0;
+                            let showable_name =
+                                variant.node().markdown_row_info(settings.with_links).0;
                             if showable_name.is_empty() {
                                 write!(fmt, r#"|"{}"|"#, name)?;
                             } else {
@@ -810,7 +825,8 @@ impl Node {
                         writeln!(fmt, "|tag-value|datatype of value|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
-                            let showable_name = variant.node().markdown_row_info(with_links).0;
+                            let showable_name =
+                                variant.node().markdown_row_info(settings.with_links).0;
                             if showable_name.is_empty() {
                                 write!(fmt, r#"|"{}"||"#, name)?;
                             } else {
@@ -830,7 +846,7 @@ impl Node {
                                 tag,
                                 name,
                                 content,
-                                variant.node().markdown_row_info(with_links).0
+                                variant.node().markdown_row_info(settings.with_links).0
                             )?;
                             to_generate.push(variant.node());
                         }
@@ -844,7 +860,7 @@ impl Node {
             tables.insert(generated);
         }
         for todo in to_generate.into_iter() {
-            todo.markdown_tables(tables, result, with_links)?;
+            todo.markdown_tables(tables, result, settings)?;
         }
         Ok(())
     }
@@ -952,13 +968,11 @@ impl Documentation {
     pub fn markdown(
         self,
         known_tables: &mut std::collections::HashSet<String>,
-        with_links: bool,
+        settings: MarkdownSettings,
     ) -> String {
         let mut s = String::new();
         let mut result = Default::default();
-        let tables = self
-            .0
-            .markdown_tables(known_tables, &mut result, with_links);
+        let tables = self.0.markdown_tables(known_tables, &mut result, settings);
         for (_, md) in result.into_iter() {
             writeln!(s, "{}", md);
         }
@@ -967,11 +981,10 @@ impl Documentation {
     pub fn markdown_tables(
         self,
         known_tables: &mut std::collections::HashSet<String>,
-        with_links: bool,
+        settings: MarkdownSettings,
     ) -> Vec<(String, String)> {
         let mut result = Default::default();
-        self.0
-            .markdown_tables(known_tables, &mut result, with_links);
+        self.0.markdown_tables(known_tables, &mut result, settings);
         result
     }
     pub fn rename(self, s: String) -> Self {
@@ -1071,4 +1084,43 @@ pub trait StructDoc {
     /// println!("Documentation: {}", Vec::<Option<String>>::document());
     /// ```
     fn document() -> Documentation;
+}
+
+#[derive(Clone, Copy)]
+pub struct MarkdownSettings {
+    with_links: bool,
+    with_optional: bool,
+}
+
+impl MarkdownSettings {
+    pub fn new() -> Self {
+        MarkdownSettings {
+            with_links: true,
+            with_optional: true,
+        }
+    }
+    pub fn with_links(self) -> Self {
+        MarkdownSettings {
+            with_links: true,
+            with_optional: self.with_optional,
+        }
+    }
+    pub fn without_links(self) -> Self {
+        MarkdownSettings {
+            with_links: false,
+            with_optional: self.with_optional,
+        }
+    }
+    pub fn with_optional(self) -> Self {
+        MarkdownSettings {
+            with_links: self.with_links,
+            with_optional: true,
+        }
+    }
+    pub fn without_optional(self) -> Self {
+        MarkdownSettings {
+            with_links: self.with_links,
+            with_optional: false,
+        }
+    }
 }
