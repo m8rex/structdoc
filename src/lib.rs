@@ -779,7 +779,7 @@ impl Node {
                 .collect::<Vec<_>>();*/
                 match tagging {
                     Tagging::Untagged => {
-                        writeln!(fmt, "One of the following items:")?;
+                        writeln!(fmt, "**One of** the following items:\n")?;
                         writeln!(fmt, "|type|description|")?;
                         writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
@@ -794,7 +794,7 @@ impl Node {
                         }
                     }
                     Tagging::External => {
-                        writeln!(fmt, "One of the following items:")?;
+                        writeln!(fmt, "**One of** the following items:\n")?;
                         writeln!(fmt, "|name|description|")?;
                         writeln!(fmt, "|--|----|")?;
                         for (name, variant) in variants.iter() {
@@ -805,8 +805,8 @@ impl Node {
                         }
                     }
                     Tagging::Internal { tag } => {
-                        writeln!(fmt, "Internal tag named {}.", tag)?;
-                        writeln!(fmt, "One of the following items:")?;
+                        writeln!(fmt, "**Internal tag** named _{}_.\n", tag)?;
+                        writeln!(fmt, "**One of** the following items:\n")?;
                         writeln!(fmt, "|tag-value|datatype of value|description|")?;
                         writeln!(fmt, "|--|--|----|")?;
                         for (name, variant) in variants.iter() {
@@ -822,7 +822,7 @@ impl Node {
                         }
                     }
                     Tagging::Adjacent { tag, content } => {
-                        writeln!(fmt, "One of the following items:")?;
+                        writeln!(fmt, "**One of** the following items:\n")?;
                         for (name, variant) in variants.iter() {
                             writeln!(
                                 fmt,
